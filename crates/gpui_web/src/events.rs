@@ -67,9 +67,7 @@ impl ClickState {
     }
 
     fn move_touch(&mut self, position: Point<Pixels>) -> Option<(Point<Pixels>, TouchPhase)> {
-        let Some(last_position) = self.touch_position.replace(position) else {
-            return None;
-        };
+        let last_position = self.touch_position.replace(position)?;
         let delta = point(position.x - last_position.x, position.y - last_position.y);
         if delta == point(px(0.), px(0.)) {
             return None;
@@ -79,18 +77,16 @@ impl ClickState {
             return Some((delta, TouchPhase::Moved));
         }
 
-        let Some(start_position) = self.touch_start_position else {
-            return None;
-        };
-        let distance = ((f32::from(position.x) - f32::from(start_position.x)).powi(2)
-            + (f32::from(position.y) - f32::from(start_position.y)).powi(2))
-        .sqrt();
+        let start_position = self.touch_start_position?;
+        let displacement = point(position.x - start_position.x, position.y - start_position.y);
+        let distance =
+            (f32::from(displacement.x).powi(2) + f32::from(displacement.y).powi(2)).sqrt();
         if distance < TOUCH_SCROLL_THRESHOLD {
             return None;
         }
 
         self.touch_scrolling = true;
-        Some((delta, TouchPhase::Started))
+        Some((displacement, TouchPhase::Started))
     }
 
     fn end_touch(&mut self) -> bool {
@@ -299,26 +295,32 @@ impl WebWindowInner {
                 } else {
                     let click_count = click_state.register_click(position, js_sys::Date::now());
                     drop(click_state);
-                    let down = this.dispatch_input(PlatformInput::MouseDown(MouseDownEvent {
-                        button: MouseButton::Left,
-                        position,
-                        modifiers,
-                        click_count,
-                        first_mouse: false,
-                    }));
-                    let up = this.dispatch_input(PlatformInput::MouseUp(MouseUpEvent {
-                        button: MouseButton::Left,
-                        position,
-                        modifiers,
-                        click_count,
-                    }));
                     // Focus only after GPUI has identified this gesture's target,
                     // but still in pointerup's trusted user-activation stack.
+                    let down_focus = {
+                        this.dispatch_input(PlatformInput::MouseDown(MouseDownEvent {
+                            button: MouseButton::Left,
+                            position,
+                            modifiers,
+                            click_count,
+                            first_mouse: false,
+                        }));
+                        this.text_input_focus_request.take()
+                    };
+                    let up_focus = {
+                        this.dispatch_input(PlatformInput::MouseUp(MouseUpEvent {
+                            button: MouseButton::Left,
+                            position,
+                            modifiers,
+                            click_count,
+                        }));
+                        this.text_input_focus_request.take()
+                    };
                     crate::input_policy::focus_after_touch(
                         &this.input_element,
                         &this.canvas,
-                        down.and_then(|result| result.text_input_focus),
-                        up.and_then(|result| result.text_input_focus),
+                        down_focus,
+                        up_focus,
                     );
                 }
                 return;
@@ -1071,7 +1073,7 @@ mod tests {
         let Some((delta, phase)) = state.move_touch(point(px(16.), px(10.))) else {
             panic!("touch movement should start scrolling after leaving the slop region");
         };
-        assert_eq!(delta, point(px(3.), px(0.)));
+        assert_eq!(delta, point(px(6.), px(0.)));
         assert_eq!(phase, TouchPhase::Started);
         assert!(state.touch_scrolling);
 
