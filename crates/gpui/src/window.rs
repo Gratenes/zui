@@ -1863,10 +1863,6 @@ impl Window {
 pub struct DispatchEventResult {
     pub propagate: bool,
     pub default_prevented: bool,
-    /// A focus request made by this event: true for a mounted text input,
-    /// false for blur/non-input focus, None if this event did not request focus.
-    /// Platforms can use this synchronously inside a trusted touch gesture.
-    pub text_input_focus: Option<bool>,
 }
 
 /// Indicates which region of the window is visible. Content falling outside of this mask will not be
@@ -5198,11 +5194,12 @@ impl Window {
                 .is_some_and(|focus| self.rendered_frame.input_focus_handles.contains(&focus))
         });
         self.focus_requested_during_dispatch |= outer_focus_request;
+        self.platform_window
+            .set_text_input_focus_request(text_input_focus);
 
         DispatchEventResult {
             propagate: cx.propagate_event,
             default_prevented: self.default_prevented,
-            text_input_focus,
         }
     }
 

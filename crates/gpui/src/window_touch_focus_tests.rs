@@ -148,18 +148,54 @@ fn touch_focus_uses_this_press_not_the_previous_painted_editor() {
         assert!(window.platform_window.take_input_handler().is_none());
         // Blank, first editor tap, editor switching, then same editor again:
         // there is intentionally NO repaint between any of these presses.
-        assert_eq!(press(window, cx, 150., 200.).text_input_focus, None);
-        assert_eq!(press(window, cx, 20., 20.).text_input_focus, Some(true));
+        press(window, cx, 150., 200.);
+        assert_eq!(
+            window
+                .platform_window
+                .as_test()
+                .unwrap()
+                .text_input_focus_request(),
+            None
+        );
+        press(window, cx, 20., 20.);
+        assert_eq!(
+            window.platform_window.as_test().unwrap().text_input_focus_request(),
+            Some(true)
+        );
         assert!(view.editors[0].is_focused(window));
-        assert_eq!(press(window, cx, 20., 60.).text_input_focus, Some(true));
+        press(window, cx, 20., 60.);
+        assert_eq!(
+            window.platform_window.as_test().unwrap().text_input_focus_request(),
+            Some(true)
+        );
         assert!(view.editors[1].is_focused(window));
-        assert_eq!(press(window, cx, 20., 60.).text_input_focus, Some(true));
+        press(window, cx, 20., 60.);
+        assert_eq!(
+            window.platform_window.as_test().unwrap().text_input_focus_request(),
+            Some(true)
+        );
         // OS keyboard dismissal does not necessarily change GPUI focus. A
         // blank press must not mistake that retained editor for fresh intent.
-        assert_eq!(press(window, cx, 150., 200.).text_input_focus, None);
-        assert_eq!(press(window, cx, 20., 100.).text_input_focus, Some(false));
+        press(window, cx, 150., 200.);
+        assert_eq!(
+            window
+                .platform_window
+                .as_test()
+                .unwrap()
+                .text_input_focus_request(),
+            None
+        );
+        press(window, cx, 20., 100.);
+        assert_eq!(
+            window.platform_window.as_test().unwrap().text_input_focus_request(),
+            Some(false)
+        );
         assert!(window.focus.is_none());
-        assert_eq!(press(window, cx, 20., 140.).text_input_focus, Some(false));
+        press(window, cx, 20., 140.);
+        assert_eq!(
+            window.platform_window.as_test().unwrap().text_input_focus_request(),
+            Some(false)
+        );
         assert!(view.neutral.is_focused(window));
     })
     .unwrap();

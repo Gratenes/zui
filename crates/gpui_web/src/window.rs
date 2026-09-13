@@ -60,6 +60,7 @@ pub(crate) struct WebWindowInner {
     mql_handle: RefCell<Option<MqlHandle>>,
     pending_physical_size: Cell<Option<(u32, u32)>>,
     resize_force_render: Cell<bool>,
+    pub(crate) text_input_focus_request: Cell<Option<bool>>,
 }
 
 pub struct WebWindow {
@@ -206,6 +207,8 @@ impl WebWindow {
             mql_handle: RefCell::new(None),
             pending_physical_size: Cell::new(None),
             resize_force_render: Cell::new(false),
+
+            text_input_focus_request: Cell::new(None),
         });
 
         let raf_closure = inner.create_raf_closure();
@@ -352,7 +355,7 @@ impl WebWindowInner {
             return;
         }
         let logical_width = viewport.width() as f32;
-        let logical_height = (viewport.height() + viewport.offset_top()) as f32;
+        let logical_height = viewport.height() as f32;
         let style = self.sizing_element.style();
         style
             .set_property("width", &format!("{logical_width}px"))
@@ -718,6 +721,10 @@ impl PlatformWindow for WebWindow {
 
     fn on_input(&self, callback: Box<dyn FnMut(PlatformInput) -> DispatchEventResult>) {
         self.inner.callbacks.borrow_mut().input = Some(callback);
+    }
+
+    fn set_text_input_focus_request(&self, request: Option<bool>) {
+        self.inner.text_input_focus_request.set(request);
     }
 
     fn on_active_status_change(&self, callback: Box<dyn FnMut(bool)>) {
