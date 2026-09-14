@@ -373,9 +373,11 @@ impl WebWindowInner {
                 }
                 return;
             }
-            this.pressed_button.set(None);
+            let Some(button) = this.pressed_button.take() else {
+                return;
+            };
             this.dispatch_input(PlatformInput::MouseUp(MouseUpEvent {
-                button: dom_mouse_button_to_gpui(event.button()),
+                button,
                 position: pointer_position_in_element(&event),
                 modifiers: modifiers_from_mouse_event(&event, this.is_mac),
                 click_count: this.click_state.borrow().current_count,
@@ -405,9 +407,11 @@ impl WebWindowInner {
                 }
                 return;
             }
-            this.pressed_button.set(None);
+            let Some(button) = this.pressed_button.take() else {
+                return;
+            };
             this.dispatch_input(PlatformInput::MouseUp(MouseUpEvent {
-                button: dom_mouse_button_to_gpui(event.button()),
+                button,
                 position: pointer_position_in_element(&event),
                 modifiers: modifiers_from_mouse_event(&event, this.is_mac),
                 click_count: this.click_state.borrow().current_count,
