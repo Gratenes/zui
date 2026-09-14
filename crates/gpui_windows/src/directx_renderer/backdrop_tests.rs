@@ -723,7 +723,6 @@ fn warp_path_tint_preserves_translucent_backdrop() -> Result<()> {
     Ok(())
 }
 
-
 #[::core::prelude::v1::test]
 fn warp_fractional_blur_clip_matches_primitive_clip() -> Result<()> {
     let (mut renderer, _window) = warp_renderer()?;
@@ -826,6 +825,7 @@ fn warp_translucent_sprites_keep_backdrop_at_scaled_edges() -> Result<()> {
                     content_mask,
                     corner_radii: Corners::all(ScaledPixels(2. * scale)),
                     fade: EdgeFadeParams::default(),
+                    alpha_mask: ImageAlphaMaskParams::default(),
                     tile,
                 });
             }
