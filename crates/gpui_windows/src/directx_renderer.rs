@@ -28,6 +28,12 @@ const RENDER_TARGET_FORMAT: DXGI_FORMAT = DXGI_FORMAT_B8G8R8A8_UNORM;
 // This configuration is used for MSAA rendering on paths only, and it's guaranteed to be supported by DirectX 11.
 const PATH_MULTISAMPLE_COUNT: u32 = 4;
 
+mod backdrop;
+use backdrop::BackdropResources;
+
+#[cfg(test)]
+mod backdrop_tests;
+
 pub(crate) struct FontInfo {
     pub gamma_ratios: [f32; 4],
     pub grayscale_enhanced_contrast: f32,
@@ -67,6 +73,8 @@ pub(crate) struct DirectXRendererDevices {
 }
 
 struct DirectXResources {
+    // Created only when a visible backdrop is drawn; dropped on resize/recovery.
+    backdrop: Option<BackdropResources>,
     // Direct3D rendering objects
     swap_chain: IDXGISwapChain1,
     render_target: Option<ID3D11Texture2D>,
@@ -325,6 +333,19 @@ impl DirectXRenderer {
         background_appearance: WindowBackgroundAppearance,
     ) -> Result<()> {
         if self.skip_draws {
+            return Ok(());
+        }
+        self.draw_scene(scene, background_appearance)?;
+        self.present()
+    }
+
+    // Kept separate from presentation so WARP tests can read the actual frame.
+    fn draw_scene(
+        &mut self,
+        scene: &Scene,
+        background_appearance: WindowBackgroundAppearance,
+    ) -> Result<()> {
+        if self.skip_draws {
             // skip drawing this frame, we just recovered from a device lost event
             // and so likely do not have the textures anymore that are required for drawing
             return Ok(());
@@ -336,12 +357,32 @@ impl DirectXRenderer {
 
         self.upload_scene_buffers(scene)?;
 
+        if scene.backdrop_blurs.is_empty() {
+            let resources = self.resources.as_mut().context("resources missing")?;
+            if resources
+                .backdrop
+                .as_mut()
+                .is_some_and(|backdrop| backdrop.expire())
+            {
+                resources.backdrop = None;
+            }
+        }
+        let mut blurs = scene.backdrop_blurs.iter().peekable();
+
         let annotation = self
             .devices
             .as_ref()
             .and_then(|devices| devices.annotation.clone())
             .filter(|annotation| unsafe { annotation.GetStatus().as_bool() });
         for batch in scene.batches() {
+            // Scene batching must split at each blur order. Snapshot before
+            // primitives at that order, so nested blurs include earlier glass.
+            if blurs.peek().is_some() {
+                let order = batch.first_order(scene);
+                while blurs.peek().is_some_and(|blur| blur.order <= order) {
+                    self.draw_backdrop_blur(blurs.next().unwrap())?;
+                }
+            }
             let _annotation = annotation
                 .as_ref()
                 .map(|annotation| Annotation::new(annotation, HSTRING::from(batch.label())));
@@ -380,7 +421,10 @@ impl DirectXRenderer {
                 )
             })?;
         }
-        self.present()
+        for blur in blurs {
+            self.draw_backdrop_blur(blur)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn resize(&mut self, new_size: Size<DevicePixels>) -> Result<()> {
@@ -396,6 +440,7 @@ impl DirectXRenderer {
         let devices = self.devices.as_ref().context("devices missing")?;
         unsafe { devices.device_context.OMSetRenderTargets(None, None) };
         let resources = self.resources.as_mut().context("resources missing")?;
+        resources.backdrop = None;
         resources.render_target.take();
         resources.render_target_view.take();
 
@@ -813,6 +858,7 @@ impl DirectXResources {
         set_rasterizer_state(&devices.device, &devices.device_context)?;
 
         Ok(Self {
+            backdrop: None,
             swap_chain,
             render_target: Some(render_target),
             render_target_view,
@@ -1416,7 +1462,8 @@ fn create_blend_state(device: &ID3D11Device) -> Result<ID3D11BlendState> {
     desc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
     desc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
     desc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
-    desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ONE;
+    // Source-over alpha preserves the native backdrop through translucent layers.
+    desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
     desc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL.0 as u8;
     unsafe {
         let mut state = None;
@@ -1477,7 +1524,8 @@ fn create_blend_state_for_path_sprite(device: &ID3D11Device) -> Result<ID3D11Ble
     desc.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;
     desc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
     desc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
-    desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ONE;
+    // Source-over alpha preserves the native backdrop through translucent layers.
+    desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
     desc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL.0 as u8;
     unsafe {
         let mut state = None;
@@ -1623,6 +1671,8 @@ pub(crate) mod shader_resources {
 
     #[derive(Copy, Clone, Debug, Eq, PartialEq)]
     pub(crate) enum ShaderModule {
+        BackdropPass,
+        BackdropComposite,
         Quad,
         Shadow,
         Underline,
@@ -1673,6 +1723,14 @@ pub(crate) mod shader_resources {
         #[cfg(not(debug_assertions))]
         fn from_bytes(module: ShaderModule, target: ShaderTarget) -> Self {
             let bytes = match module {
+                ShaderModule::BackdropPass => match target {
+                    ShaderTarget::Vertex => BACKDROP_PASS_VERTEX_BYTES,
+                    ShaderTarget::Fragment => BACKDROP_PASS_FRAGMENT_BYTES,
+                },
+                ShaderModule::BackdropComposite => match target {
+                    ShaderTarget::Vertex => BACKDROP_COMPOSITE_VERTEX_BYTES,
+                    ShaderTarget::Fragment => BACKDROP_COMPOSITE_FRAGMENT_BYTES,
+                },
                 ShaderModule::Quad => match target {
                     ShaderTarget::Vertex => QUAD_VERTEX_BYTES,
                     ShaderTarget::Fragment => QUAD_FRAGMENT_BYTES,
@@ -1787,6 +1845,8 @@ pub(crate) mod shader_resources {
     impl ShaderModule {
         pub fn as_str(self) -> &'static str {
             match self {
+                ShaderModule::BackdropPass => "backdrop_pass",
+                ShaderModule::BackdropComposite => "backdrop_composite",
                 ShaderModule::Quad => "quad",
                 ShaderModule::Shadow => "shadow",
                 ShaderModule::Underline => "underline",
