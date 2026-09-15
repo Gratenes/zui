@@ -47,6 +47,7 @@ pub(crate) struct WebWindowInner {
     pub(crate) canvas: web_sys::HtmlCanvasElement,
     sizing_element: web_sys::HtmlElement,
     pub(crate) input_element: web_sys::HtmlInputElement,
+    pub(crate) touch_input_overlay: bool,
     pub(crate) has_device_pixel_support: bool,
     pub(crate) is_mac: bool,
     pub(crate) state: RefCell<WebWindowMutableState>,
@@ -150,9 +151,16 @@ impl WebWindow {
         input_style.set_property("width", "1px").ok();
         input_style.set_property("height", "1px").ok();
         input_style.set_property("opacity", "0").ok();
+        input_style.set_property("pointer-events", "none").ok();
         body.append_child(&input_element)
             .map_err(|e| anyhow::anyhow!("Failed to append input to body: {e:?}"))?;
         input_element.focus().ok();
+
+        let touch_input_overlay = browser_window
+            .match_media("(pointer: coarse)")
+            .ok()
+            .flatten()
+            .is_some_and(|media| media.matches());
 
         let device_size = Size {
             width: DevicePixels(0),
@@ -196,6 +204,7 @@ impl WebWindow {
             canvas,
             sizing_element,
             input_element,
+            touch_input_overlay,
             has_device_pixel_support,
             is_mac,
             state: RefCell::new(mutable_state),
@@ -274,6 +283,30 @@ impl WebWindow {
 }
 
 impl WebWindowInner {
+    fn position_touch_input(&self, input_handler: &mut PlatformInputHandler) {
+        if !self.touch_input_overlay {
+            return;
+        }
+        let Some(bounds) = input_handler.element_bounds() else {
+            return;
+        };
+        let style = self.input_element.style();
+        style.set_property("display", "block").ok();
+        style.set_property("pointer-events", "auto").ok();
+        style.set_property("touch-action", "auto").ok();
+        style.set_property("outline", "none").ok();
+        style.set_property("border", "0").ok();
+        style.set_property("background", "transparent").ok();
+        style.set_property("color", "transparent").ok();
+        style.set_property("caret-color", "transparent").ok();
+        style.set_property("-webkit-tap-highlight-color", "transparent").ok();
+        style.set_property("top", &format!("{}px", f32::from(bounds.origin.y))).ok();
+        style.set_property("left", &format!("{}px", f32::from(bounds.origin.x))).ok();
+        style.set_property("width", &format!("{}px", f32::from(bounds.size.width))).ok();
+        style.set_property("height", &format!("{}px", f32::from(bounds.size.height))).ok();
+        style.set_property("opacity", "0.01").ok();
+    }
+
     fn apply_canvas_size(
         &self,
         physical_width: u32,
@@ -650,6 +683,8 @@ impl PlatformWindow for WebWindow {
     }
 
     fn set_input_handler(&mut self, input_handler: PlatformInputHandler) {
+        let mut input_handler = input_handler;
+        self.inner.position_touch_input(&mut input_handler);
         self.inner.state.borrow_mut().input_handler = Some(input_handler);
     }
 

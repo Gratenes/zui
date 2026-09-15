@@ -172,7 +172,20 @@ impl WebWindowInner {
         self.canvas
             .add_event_listener_with_callback(event_name, closure.as_ref().unchecked_ref())
             .ok();
+        if self.touch_input_overlay && event_name.starts_with("pointer") {
+            self.input_element
+                .add_event_listener_with_callback(event_name, closure.as_ref().unchecked_ref())
+                .ok();
+        }
         closure
+    }
+
+    fn is_touch_input_overlay_target(&self, event: &web_sys::PointerEvent) -> bool {
+        self.touch_input_overlay
+            && event
+                .target()
+                .and_then(|target| target.dyn_into::<web_sys::HtmlInputElement>().ok())
+                .is_some_and(|target| target == self.input_element)
     }
 
     fn listen_input(
@@ -226,12 +239,17 @@ impl WebWindowInner {
         let this = Rc::clone(self);
         self.listen("pointerdown", move |event: JsValue| {
             let event: web_sys::PointerEvent = event.unchecked_into();
-            event.prevent_default();
+            let overlay_target = this.is_touch_input_overlay_target(&event);
+            if !overlay_target {
+                event.prevent_default();
+            }
 
             if this.active_pointer_id.get().is_some() {
                 return;
             }
-            this.canvas.set_pointer_capture(event.pointer_id()).ok();
+            if !overlay_target {
+                this.canvas.set_pointer_capture(event.pointer_id()).ok();
+            }
             this.active_pointer_id.set(Some(event.pointer_id()));
 
             if event.pointer_type() == "touch" {
@@ -271,7 +289,10 @@ impl WebWindowInner {
         let this = Rc::clone(self);
         self.listen("pointerup", move |event: JsValue| {
             let event: web_sys::PointerEvent = event.unchecked_into();
-            event.prevent_default();
+            let overlay_target = this.is_touch_input_overlay_target(&event);
+            if !overlay_target {
+                event.prevent_default();
+            }
 
             if this.active_pointer_id.get() != Some(event.pointer_id()) {
                 return;
@@ -284,7 +305,9 @@ impl WebWindowInner {
                 let touch_scrolling = click_state.end_touch();
 
                 this.active_pointer_id.set(None);
-                this.canvas.release_pointer_capture(event.pointer_id()).ok();
+                if !overlay_target {
+                    this.canvas.release_pointer_capture(event.pointer_id()).ok();
+                }
 
                 if touch_scrolling {
                     this.dispatch_input(PlatformInput::ScrollWheel(ScrollWheelEvent {
@@ -424,7 +447,9 @@ impl WebWindowInner {
         let this = Rc::clone(self);
         self.listen("pointermove", move |event: JsValue| {
             let event: web_sys::PointerEvent = event.unchecked_into();
-            event.prevent_default();
+            if !this.is_touch_input_overlay_target(&event) {
+                event.prevent_default();
+            }
 
             if this
                 .active_pointer_id
