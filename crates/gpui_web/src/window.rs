@@ -5,7 +5,7 @@ use std::{cell::Cell, cell::RefCell, rc::Rc};
 
 use gpui::{
     AnyWindowHandle, Bounds, Capslock, Decorations, DevicePixels, DispatchEventResult, GpuSpecs,
-    Modifiers, MouseButton, Pixels, PlatformAtlas, PlatformDisplay, PlatformInput,
+    ClipboardItem, Modifiers, MouseButton, Pixels, PlatformAtlas, PlatformDisplay, PlatformInput,
     PlatformInputHandler, PlatformWindow, Point, PromptButton, PromptLevel, RequestFrameOptions,
     ResizeEdge, Scene, Size, WindowAppearance, WindowBackgroundAppearance, WindowBounds,
     WindowControlArea, WindowControls, WindowDecorations, WindowParams, px,
@@ -61,6 +61,7 @@ pub(crate) struct WebWindowInner {
     pending_physical_size: Cell<Option<(u32, u32)>>,
     resize_force_render: Cell<bool>,
     pub(crate) text_input_focus_request: Cell<Option<bool>>,
+    pub(crate) clipboard: Rc<RefCell<Option<ClipboardItem>>>,
 }
 
 pub struct WebWindow {
@@ -81,6 +82,7 @@ impl WebWindow {
         _params: WindowParams,
         context: &WgpuContext,
         browser_window: web_sys::Window,
+        clipboard: Rc<RefCell<Option<ClipboardItem>>>,
     ) -> anyhow::Result<Self> {
         let document = browser_window
             .document()
@@ -209,6 +211,7 @@ impl WebWindow {
             resize_force_render: Cell::new(false),
 
             text_input_focus_request: Cell::new(None),
+            clipboard,
         });
 
         let raf_closure = inner.create_raf_closure();

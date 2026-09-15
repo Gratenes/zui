@@ -1,10 +1,11 @@
 use std::{cell::Cell, ops::Range, rc::Rc};
 
 use gpui::{
-    Capslock, DispatchEventResult, ExternalPaths, FileDropEvent, KeyDownEvent, KeyUpEvent,
-    Keystroke, Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseExitEvent,
-    MouseMoveEvent, MouseUpEvent, NavigationDirection, Pixels, PlatformInput, Point, ScrollDelta,
-    ScrollWheelEvent, TouchPhase, UTF16Selection, point, px,
+    Capslock, ClipboardEntry, ClipboardItem, DispatchEventResult, ExternalPaths, FileDropEvent,
+    Image, ImageFormat, KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, ModifiersChangedEvent,
+    MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent,
+    NavigationDirection, Pixels, PlatformInput, Point, ScrollDelta, ScrollWheelEvent,
+    TouchPhase, UTF16Selection, point, px,
 };
 use smallvec::smallvec;
 use wasm_bindgen::prelude::*;
@@ -762,11 +763,9 @@ impl WebWindowInner {
         })
     }
 
-    /// Paste is delivered through the DOM `paste` event rather than
-    /// `Platform::read_from_clipboard`: the browser's asynchronous clipboard
-    /// read API cannot fit that synchronous signature, while `ClipboardEvent`
-    /// exposes `clipboardData` synchronously inside the event. It fires for
-    /// any browser-initiated paste (keyboard, menu bar, context menu).
+    /// Bridge DOM paste data into GPUI's synchronous clipboard while dispatching
+    /// its normal paste key binding. This preserves app-specific paste handling
+    /// (notably image attachments) instead of bypassing it with raw text input.
     fn register_paste(self: &Rc<Self>) -> Closure<dyn FnMut(JsValue)> {
         let this = Rc::clone(self);
         self.listen_input("paste", move |event: JsValue| {
@@ -774,18 +773,60 @@ impl WebWindowInner {
             let Some(clipboard_data) = event.clipboard_data() else {
                 return;
             };
-            let Ok(text) = clipboard_data.get_data("text/plain") else {
-                return;
-            };
-            if text.is_empty() {
+            let text = clipboard_data.get_data("text/plain").unwrap_or_default();
+            let files = clipboard_data.files();
+            if text.is_empty() && files.as_ref().is_none_or(|files| files.length() == 0) {
                 return;
             }
-
             event.prevent_default();
-            this.with_input_handler(|handler| {
-                handler.replace_text_in_range(None, &text);
+            if files.as_ref().is_none_or(|files| files.length() == 0) {
+                this.dispatch_paste(ClipboardItem::new_string(text));
+                return;
+            }
+            let this = Rc::clone(&this);
+            let file_count = files.as_ref().map_or(0, web_sys::FileList::length);
+            wasm_bindgen_futures::spawn_local(async move {
+                let mut entries = Vec::new();
+                for index in 0..file_count {
+                    let Some(file) = files.as_ref().and_then(|files| files.get(index)) else {
+                        continue;
+                    };
+                    let Some(format) = ImageFormat::from_mime_type(&file.type_()) else {
+                        continue;
+                    };
+                    let Ok(bytes) = wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await else {
+                        continue;
+                    };
+                    entries.push(ClipboardEntry::Image(Image::from_bytes(
+                        format,
+                        js_sys::Uint8Array::new(&bytes).to_vec(),
+                    )));
+                }
+                if entries.is_empty() && !text.is_empty() {
+                    entries.push(ClipboardEntry::String(gpui::ClipboardString::new(text)));
+                }
+                if !entries.is_empty() {
+                    this.dispatch_paste(ClipboardItem { entries });
+                }
             });
         })
+    }
+
+    fn dispatch_paste(&self, item: ClipboardItem) {
+        *self.clipboard.borrow_mut() = Some(item);
+        self.dispatch_input(PlatformInput::KeyDown(KeyDownEvent {
+            keystroke: Keystroke {
+                key: "v".into(),
+                key_char: None,
+                modifiers: Modifiers {
+                    control: !self.is_mac,
+                    platform: self.is_mac,
+                    ..Modifiers::default()
+                },
+            },
+            is_held: false,
+            prefer_character_input: false,
+        }));
     }
 
     fn register_composition_start(self: &Rc<Self>) -> Closure<dyn FnMut(JsValue)> {
