@@ -1346,8 +1346,10 @@ BackdropVertex backdrop_pass_vertex(uint vertex_id: SV_VertexID) {
 }
 
 float4 backdrop_pass_fragment(BackdropVertex input): SV_Target {
-    float sigma = backdrop_kernel.z;
-    int radius = int(ceil(3. * sigma));
+    // Defense in depth: bound the dynamic loop before converting to int.
+    // Matches MAX_SIGMA in directx_renderer/backdrop.rs.
+    float sigma = clamp(backdrop_kernel.z, 1., 64.);
+    int radius = min(int(ceil(3. * sigma)), 192);
     float2 step_uv = backdrop_kernel.xy;
     float4 sum = 0.;
     if (radius <= 128) {
@@ -1372,7 +1374,7 @@ float4 backdrop_pass_fragment(BackdropVertex input): SV_Target {
         }
         return sum;
     }
-    // Match Metal/wgpu for radii larger than the cached CPU kernel.
+    // Compute uncached weights, with a hard maximum of 385 samples per pixel.
     float total_weight = 0.;
     [loop] for (int k = -radius; k <= radius; ++k) {
         float weight = exp(-float(k) * float(k) / (2. * sigma * sigma));

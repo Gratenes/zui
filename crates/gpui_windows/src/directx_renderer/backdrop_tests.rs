@@ -230,7 +230,7 @@ fn sample(image: &[[u8; 4]], width: usize, height: usize, x: f32, y: f32) -> [f3
 }
 
 fn cpu_blur(image: &[[u8; 4]], width: usize, height: usize, blur: BackdropBlur) -> Vec<[u8; 4]> {
-    let sigma = blur.blur_radius.0.max(1.);
+    let sigma = blur.blur_radius.0.clamp(1., 64.);
     let stride = ((sigma / 8.) as usize).clamp(1, 4);
     let bw = width.div_ceil(stride);
     let bh = height.div_ceil(stride);
@@ -444,7 +444,7 @@ fn warp_backdrop_downsampling_and_large_kernel() -> Result<()> {
             })
         })
         .collect();
-    for sigma in [0., 2.5, 16., 24., 32., 180.] {
+    for sigma in [0., 2.5, 16., 24., 32., 64., 180., f32::MAX] {
         renderer.pre_draw(&[0.; 4])?;
         let context = &renderer.devices.as_ref().unwrap().device_context;
         unsafe {
@@ -953,5 +953,44 @@ fn warp_large_blur_removes_fine_stripes() -> Result<()> {
             );
         }
     }
+    Ok(())
+}
+
+#[::core::prelude::v1::test]
+fn warp_invalid_geometry_allocates_nothing_and_idle_cache_expires() -> Result<()> {
+    let (mut renderer, _window) = warp_renderer()?;
+    let mut scene = Scene::default();
+    for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -1.] {
+        for field in 0..4 {
+            let mut region = blur(0);
+            match field {
+                0 => region.bounds.size.width = ScaledPixels(value),
+                1 => region.content_mask.bounds.size.height = ScaledPixels(value),
+                2 => region.corner_radii.top_left = ScaledPixels(value),
+                _ => {
+                    region.bounds.origin.x =
+                        ScaledPixels(if value == -1. { f32::INFINITY } else { value })
+                }
+            }
+            scene.backdrop_blurs = vec![region];
+            renderer.draw_scene(&scene, WindowBackgroundAppearance::Opaque)?;
+            assert!(renderer.resources.as_ref().unwrap().backdrop.is_none());
+            assert!(pixels(&renderer)?.iter().all(|pixel| *pixel == [255; 4]));
+        }
+    }
+    scene.backdrop_blurs = vec![BackdropBlur {
+        bounds: bounds(f32::MAX, 0., f32::MAX, 10.),
+        ..blur(0)
+    }];
+    renderer.draw_scene(&scene, WindowBackgroundAppearance::Opaque)?;
+    assert!(renderer.resources.as_ref().unwrap().backdrop.is_none());
+    scene.backdrop_blurs = vec![blur(0)];
+    renderer.draw_scene(&scene, WindowBackgroundAppearance::Opaque)?;
+    assert!(renderer.resources.as_ref().unwrap().backdrop.is_some());
+    scene.backdrop_blurs[0].bounds = bounds(-100., -100., 8., 8.);
+    for _ in 0..120 {
+        renderer.draw_scene(&scene, WindowBackgroundAppearance::Opaque)?;
+    }
+    assert!(renderer.resources.as_ref().unwrap().backdrop.is_none());
     Ok(())
 }

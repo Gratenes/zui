@@ -357,7 +357,9 @@ impl DirectXRenderer {
 
         self.upload_scene_buffers(scene)?;
 
-        if scene.backdrop_blurs.is_empty() {
+        {
+            // Age unused resources even if the scene contains only clipped or
+            // invalid blurs. Drawing a visible blur resets the idle counter.
             let resources = self.resources.as_mut().context("resources missing")?;
             if resources
                 .backdrop

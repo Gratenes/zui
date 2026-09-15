@@ -3,6 +3,9 @@ use super::*;
 
 const IDLE_FRAMES: u32 = 120;
 const KERNEL_VECTORS: usize = 33;
+// Bound shader work even when callers supply extreme finite radii. Keep in sync
+// with backdrop_pass_fragment; this is sigma in device pixels (192-tap radius).
+const MAX_SIGMA: f32 = 64.;
 
 // b1 in shaders.hlsl. Every field starts on a 16-byte HLSL register boundary.
 #[repr(C)]
@@ -228,7 +231,18 @@ impl BackdropResources {
 
 impl DirectXRenderer {
     pub(super) fn draw_backdrop_blur(&mut self, blur: &BackdropBlur) -> Result<()> {
-        if !blur.blur_radius.0.is_finite() {
+        if !blur.blur_radius.0.is_finite()
+            || !valid_bounds(blur.bounds)
+            || !valid_bounds(blur.content_mask.bounds)
+            || ![
+                blur.corner_radii.top_left.0,
+                blur.corner_radii.top_right.0,
+                blur.corner_radii.bottom_right.0,
+                blur.corner_radii.bottom_left.0,
+            ]
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.)
+        {
             return Ok(());
         }
         let visible = blur
@@ -244,7 +258,7 @@ impl DirectXRenderer {
         if visible.size.width.0 <= 0. || visible.size.height.0 <= 0. {
             return Ok(());
         }
-        let sigma = blur.blur_radius.0.max(1.);
+        let sigma = blur.blur_radius.0.clamp(1., MAX_SIGMA);
         let padding = (sigma * 3.).ceil() + 2.;
         let x0 = (visible.origin.x.0 - padding).floor().max(0.) as u32;
         let y0 = (visible.origin.y.0 - padding).floor().max(0.) as u32;
@@ -254,6 +268,9 @@ impl DirectXRenderer {
         let y1 = (visible.origin.y.0 + visible.size.height.0 + padding)
             .ceil()
             .min(self.height as f32) as u32;
+        if x1 <= x0 || y1 <= y0 {
+            return Ok(());
+        }
         let downsample = ((sigma / 8.) as u32).clamp(1, 4);
         let devices = self.devices.as_ref().context("devices missing")?;
         let resources = self.resources.as_mut().context("resources missing")?;
@@ -389,6 +406,14 @@ fn rect(bounds: Bounds<ScaledPixels>) -> [f32; 4] {
         bounds.size.width.0,
         bounds.size.height.0,
     ]
+}
+
+fn valid_bounds(bounds: Bounds<ScaledPixels>) -> bool {
+    rect(bounds).iter().all(|value| value.is_finite())
+        && bounds.size.width.0 >= 0.
+        && bounds.size.height.0 >= 0.
+        && bounds.right().0.is_finite()
+        && bounds.bottom().0.is_finite()
 }
 
 fn gaussian_weights(sigma: f32) -> [[f32; 4]; KERNEL_VECTORS] {
