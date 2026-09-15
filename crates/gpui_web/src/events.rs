@@ -780,7 +780,9 @@ impl WebWindowInner {
             }
             event.prevent_default();
             if files.as_ref().is_none_or(|files| files.length() == 0) {
-                this.dispatch_paste(ClipboardItem::new_string(text));
+                this.with_input_handler(|handler| {
+                    handler.replace_text_in_range(None, &text);
+                });
                 return;
             }
             let this = Rc::clone(&this);
