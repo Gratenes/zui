@@ -186,7 +186,7 @@ impl WebWindowInner {
             .ok();
         // Touch click-away parks DOM focus on the non-editable canvas, so
         // hardware keyboard shortcuts and window activation still work there.
-        if matches!(event_name, "keydown" | "keyup" | "focus" | "blur") {
+        if matches!(event_name, "keydown" | "keyup" | "paste" | "focus" | "blur") {
             self.canvas
                 .add_event_listener_with_callback(event_name, closure.as_ref().unchecked_ref())
                 .ok();
