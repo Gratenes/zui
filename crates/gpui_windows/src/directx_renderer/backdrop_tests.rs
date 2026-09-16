@@ -812,6 +812,7 @@ fn warp_translucent_sprites_keep_backdrop_at_scaled_edges() -> Result<()> {
                     bounds: sprite_bounds,
                     content_mask,
                     color: hsla(0.1, 0.6, 0.8, 0.6),
+                    fade: EdgeFadeParams::default(),
                     tile,
                     transformation: TransformationMatrix::default(),
                 });

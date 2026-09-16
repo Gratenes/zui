@@ -75,4 +75,52 @@ mod shader_tests {
             }
         }
     }
+    #[test]
+    fn text_fade_shaders_validate_and_match_host_layout() {
+        use std::mem::{offset_of, size_of};
+        let source = format!(
+            "enable dual_source_blending;\n{}\n{}",
+            include_str!("shaders.wgsl"),
+            include_str!("shaders_subpixel.wgsl"),
+        );
+        let module = naga::front::wgsl::parse_str(&source).unwrap();
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .unwrap();
+        for (name, size, fade_offset) in [
+            (
+                "MonochromeSprite",
+                size_of::<gpui::MonochromeSprite>(),
+                offset_of!(gpui::MonochromeSprite, fade),
+            ),
+            (
+                "SubpixelSprite",
+                size_of::<gpui::SubpixelSprite>(),
+                offset_of!(gpui::SubpixelSprite, fade),
+            ),
+        ] {
+            let ty = module
+                .types
+                .iter()
+                .find(|(_, ty)| ty.name.as_deref() == Some(name))
+                .unwrap()
+                .1;
+            let naga::TypeInner::Struct { members, span } = &ty.inner else {
+                panic!("expected struct")
+            };
+            assert_eq!(*span as usize, size, "{name} stride");
+            assert_eq!(
+                members
+                    .iter()
+                    .find(|m| m.name.as_deref() == Some("fade"))
+                    .unwrap()
+                    .offset as usize,
+                fade_offset,
+                "{name}.fade"
+            );
+        }
+    }
 }

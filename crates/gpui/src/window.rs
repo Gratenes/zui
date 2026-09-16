@@ -3501,9 +3501,9 @@ impl Window {
     /// Executes the provided function with a vertical [`EdgeFade`] applied:
     /// every primitive painted inside is additionally faded by its vertical
     /// position — full alpha in the region's body, ramping to zero across
-    /// `fade.band` at each active edge. Granularity is per-primitive (each
-    /// quad/glyph/sprite takes the ramp value at its own position), which
-    /// reads as a smooth gradient for text and small marks.
+    /// `fade.band` at each active edge. Quads, text glyphs, and images evaluate
+    /// the ramp per fragment, so even a glyph crossing an edge fades smoothly.
+    /// Paths, decorations, and SVG icons retain conservative primitive opacity.
     pub fn with_edge_fade<R>(
         &mut self,
         fade: Option<EdgeFade>,
@@ -4295,10 +4295,7 @@ impl Window {
     ) -> Result<()> {
         self.invalidator.debug_assert_paint();
 
-        let element_opacity = self.element_opacity_for_bounds(&Bounds {
-            origin,
-            size: size(font_size * 0.6, font_size),
-        });
+        let element_opacity = self.element_opacity();
         let scale_factor = self.scale_factor();
         let glyph_origin = origin.scale(scale_factor);
 
@@ -4350,6 +4347,7 @@ impl Window {
                     color: color.opacity(element_opacity),
                     tile,
                     transformation: TransformationMatrix::unit(),
+                    fade: self.scaled_edge_fade(),
                 });
             } else {
                 self.next_frame.scene.insert_primitive(MonochromeSprite {
@@ -4360,6 +4358,7 @@ impl Window {
                     color: color.opacity(element_opacity),
                     tile,
                     transformation: TransformationMatrix::unit(),
+                    fade: self.scaled_edge_fade(),
                 });
             }
         }
@@ -4509,6 +4508,7 @@ impl Window {
             color: color.opacity(element_opacity),
             tile,
             transformation,
+            fade: Default::default(),
         });
 
         Ok(())

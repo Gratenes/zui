@@ -2500,6 +2500,80 @@ mod backdrop_blur_tests {
     }
 
     #[test]
+    fn monochrome_fade_varies_within_a_glyph_and_moves_continuously() {
+        use gpui::{
+            EdgeFadeParams, MonochromeSprite, PlatformAtlas, RenderSvgParams, TransformationMatrix,
+        };
+        use std::borrow::Cow;
+        assert!(
+            metal::Device::system_default().is_some(),
+            "requires Metal GPU"
+        );
+        let mut renderer =
+            MetalRenderer::new_headless(Arc::new(Mutex::new(InstanceBufferPool::default())));
+        let tile_size = size(DevicePixels(32), DevicePixels(16));
+        let tile = renderer
+            .sprite_atlas()
+            .get_or_insert_with(
+                &RenderSvgParams {
+                    path: "fade-test-mask".into(),
+                    size: tile_size,
+                }
+                .into(),
+                &mut || Ok(Some((tile_size, Cow::Owned(vec![255; 32 * 16])))),
+            )
+            .unwrap()
+            .unwrap();
+        let mut paint = |edge: f32, band: f32| {
+            let mut scene = Scene::default();
+            push_quad(&mut scene, viewport(), 0.0);
+            // A solid glyph-sized mask isolates the opacity ramp from glyph
+            // shape and antialiasing. A whole-glyph fade cannot pass this.
+            scene.insert_primitive(MonochromeSprite {
+                order: 0,
+                pad: 0,
+                bounds: bounds(20., 20., 32., 16.),
+                content_mask: ContentMask { bounds: viewport() },
+                color: Hsla {
+                    h: 0.,
+                    s: 0.,
+                    l: 1.,
+                    a: 1.,
+                },
+                tile,
+                transformation: TransformationMatrix::unit(),
+                fade: EdgeFadeParams {
+                    right_x: edge,
+                    band_right: band,
+                    ..Default::default()
+                },
+            });
+            scene.finish();
+            renderer
+                .render_scene_to_image(&scene, size(DevicePixels(VIEW_W), DevicePixels(VIEW_H)))
+                .unwrap()
+        };
+        let plain = paint(52., 0.);
+        assert_eq!(plain.get_pixel(40, 28)[0], 255);
+        let faded = paint(52., 20.);
+        for x in 33..51 {
+            let expected = (((52. - (x as f32 + 0.5)) / 20.).powi(2) * 255.).round() as i32;
+            assert!(
+                (faded.get_pixel(x, 28)[0] as i32 - expected).abs() <= 2,
+                "x={x}"
+            );
+        }
+        let shifted = paint(52.5, 20.);
+        for x in 33..51 {
+            let delta = shifted.get_pixel(x, 28)[0] as i32 - faded.get_pixel(x, 28)[0] as i32;
+            assert!(
+                (0..=14).contains(&delta),
+                "discontinuous fade at x={x}: {delta}"
+            );
+        }
+    }
+
+    #[test]
     fn image_alpha_mask_matches_reference_and_reuses_texture_across_frames() {
         use gpui::{ImageAlphaMaskParams, PlatformAtlas, RenderImage, RenderImageParams};
         use std::borrow::Cow;

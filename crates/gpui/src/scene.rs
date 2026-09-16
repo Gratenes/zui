@@ -811,6 +811,7 @@ pub struct MonochromeSprite {
     pub color: Hsla,
     pub tile: AtlasTile,
     pub transformation: TransformationMatrix,
+    pub fade: EdgeFadeParams,
 }
 
 impl From<MonochromeSprite> for Primitive {
@@ -830,6 +831,7 @@ pub struct SubpixelSprite {
     pub color: Hsla,
     pub tile: AtlasTile,
     pub transformation: TransformationMatrix,
+    pub fade: EdgeFadeParams,
 }
 
 impl From<SubpixelSprite> for Primitive {
@@ -1249,6 +1251,7 @@ mod tests {
                 bounds: bounds(),
                 content_mask: ContentMask { bounds: bounds() },
                 color: crate::black(),
+                fade: EdgeFadeParams::default(),
                 tile: AtlasTile {
                     texture_id: AtlasTextureId {
                         index,
