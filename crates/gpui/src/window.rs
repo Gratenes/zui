@@ -4054,10 +4054,12 @@ impl Window {
 
     /// Paint a within-window backdrop blur: everything already painted
     /// beneath `bounds` is snapshotted and painted back gaussian-blurred
-    /// inside the rounded rect (frosted-glass popovers). macOS Metal only —
-    /// other renderers ignore it, so callers keep a translucent fill over it
-    /// and the fallback is merely unblurred. Content painted AFTER this call
+    /// inside the rounded rect (frosted-glass popovers). Supported by Metal,
+    /// wgpu, and Windows DirectX. Callers can keep a translucent fill over it
+    /// for renderers without blur support. Content painted AFTER this call
     /// composites on top of the blur.
+    /// Give nested panels distinct [`Self::paint_layer`] scopes so each blur
+    /// captures the content beneath its own draw order.
     pub fn paint_backdrop_blur(
         &mut self,
         bounds: Bounds<Pixels>,
