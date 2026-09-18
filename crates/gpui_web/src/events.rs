@@ -131,6 +131,22 @@ fn should_prevent_keydown_default(result: &DispatchEventResult) -> bool {
     !result.propagate || result.default_prevented
 }
 
+/// True for the platform's native paste chord (Ctrl+V, or Cmd+V on macOS)
+/// with no extra modifiers. `register_key_down` must not dispatch this as a
+/// GPUI action nor cancel its browser default: doing so consumes the
+/// keydown before the browser's native paste command can fire, so the
+/// `paste` DOM event (and the real clipboard payload it carries) never
+/// arrives. `register_paste` delivers fresh data for this shortcut instead,
+/// via a synthetic keydown fed straight into `dispatch_input`.
+fn is_native_paste_shortcut(key: &str, modifiers: &Modifiers, is_mac: bool) -> bool {
+    key == "v"
+        && modifiers.control == !is_mac
+        && modifiers.platform == is_mac
+        && !modifiers.alt
+        && !modifiers.shift
+        && !modifiers.function
+}
+
 impl WebWindowInner {
     pub fn register_event_listeners(self: &Rc<Self>) -> WebEventListeners {
         let mut closures = vec![
@@ -614,6 +630,13 @@ impl WebWindowInner {
 
             let is_held = event.repeat();
             let key_char = compute_key_char(&event, &key, &modifiers);
+
+            if is_native_paste_shortcut(&key, &modifiers, this.is_mac) {
+                // Let the browser's default paste command run so the `paste`
+                // DOM event fires with real clipboard contents; see
+                // `register_paste`/`dispatch_paste`.
+                return;
+            }
 
             let keystroke = Keystroke {
                 modifiers,
