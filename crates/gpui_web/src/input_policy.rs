@@ -22,6 +22,22 @@ pub(crate) fn focus_after_touch(
     up: Option<bool>,
 ) {
     if touch_requests_keyboard(down, up) {
+        // Mobile browsers can hide the soft keyboard (e.g. Android Back)
+        // without blurring the input, and focus() on the already-active
+        // element never shows it again. Bounce through the canvas, the other
+        // keyboard target, so the window stays active.
+        let input_is_active = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.active_element())
+            .is_some_and(|active| {
+                let input: &wasm_bindgen::JsValue = input.as_ref();
+                let active: wasm_bindgen::JsValue = active.into();
+                active == *input
+            });
+        if input_is_active {
+            canvas.set_tab_index(-1);
+            canvas.focus().ok();
+        }
         input.focus().ok();
     } else {
         // A non-editable keyboard target dismisses the soft keyboard without
